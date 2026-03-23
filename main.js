@@ -160,6 +160,9 @@ module.exports = class NotionLikeEditorPlugin extends Plugin {
     this.slashMenuEl = null;
     this.slashHintEl = null;
     this.selectionBarEl = null;
+    this.selectionColorPopoverEl = null;
+    this.selectionColorPopoverKind = null;
+    this.selectionColorState = { tc: null, bg: null };
     this.slashState = null;
     this.slashDismiss = null;
     this.lastActiveEditor = null;
@@ -191,11 +194,13 @@ module.exports = class NotionLikeEditorPlugin extends Plugin {
       this.positionSlashMenu();
       this.positionSlashHint();
       this.positionSelectionBar();
+      this.positionSelectionColorPopover();
     });
     this.registerDomEvent(window, "scroll", () => {
       this.positionSlashMenu();
       this.positionSlashHint();
       this.positionSelectionBar();
+      this.positionSelectionColorPopover();
     }, true);
 
     this.registerDomEvent(window, "keydown", (evt) => {
@@ -216,6 +221,7 @@ module.exports = class NotionLikeEditorPlugin extends Plugin {
       const t = evt.target;
       if (this.slashMenuEl && t instanceof Node && this.slashMenuEl.contains(t)) return;
       if (this.selectionBarEl && t instanceof Node && this.selectionBarEl.contains(t)) return;
+      if (this.selectionColorPopoverEl && t instanceof Node && this.selectionColorPopoverEl.contains(t)) return;
       this.dismissSlashMenu();
       this.hideSelectionBar();
     });
@@ -251,6 +257,138 @@ module.exports = class NotionLikeEditorPlugin extends Plugin {
   onunload() {
     this.hideSlashMenu();
     this.hideSelectionBar();
+    this.hideSelectionColorPopover();
+  }
+
+  buildColorPickerHtml() {
+    const theme = [
+      "#000000", "#f2f2f2", "#1f4e79", "#2b6cb0", "#c05621", "#2f855a", "#6b46c1", "#0f7b6c", "#e03e3e",
+      "#434343", "#d9d9d9", "#17365d", "#1e4e8c", "#7b341e", "#276749", "#44337a", "#0b5d51", "#9b2c2c",
+      "#666666", "#bfbfbf", "#0f2f4b", "#153e75", "#652b19", "#22543d", "#322659", "#08443a", "#742a2a",
+      "#999999", "#a6a6a6", "#0b2234", "#1a365d", "#4a1d0a", "#1c4532", "#2a2141", "#063a32", "#5a1f1f"
+    ];
+    const standard = ["#ff0000", "#ff9900", "#ffff00", "#99cc00", "#00cc66", "#00cccc", "#00a2ff", "#0047ff", "#0000ff", "#9900ff"];
+    const custom = ["#f79646", "#4f81bd", "#8064a2", "#7f7f7f"];
+
+    const swatchBtn = (c) =>
+      `<button class="nst-swatch" data-color="${escapeHtml(c)}" style="background:${escapeHtml(c)};--c:${escapeHtml(c)}"></button>`;
+
+    return `
+      <div class="nst-color-panel">
+        <div class="nst-color-title">Theme Colors</div>
+        <div class="nst-color-grid">${theme.map(swatchBtn).join("")}</div>
+        <div class="nst-color-title">Standard Colors</div>
+        <div class="nst-color-row">${standard.map(swatchBtn).join("")}</div>
+        <div class="nst-color-title">Custom Font Colors</div>
+        <div class="nst-color-row">${custom.map(swatchBtn).join("")}</div>
+        <div class="nst-color-actions">
+          <button class="nst-color-action" disabled aria-disabled="true">🧪</button>
+          <button class="nst-color-action" disabled aria-disabled="true">🎨</button>
+        </div>
+      </div>
+    `;
+  }
+
+  ensureSelectionColorPopover() {
+    if (this.selectionColorPopoverEl) return this.selectionColorPopoverEl;
+    const el = document.createElement("div");
+    el.className = "nst-color-popover";
+    el.style.display = "none";
+    el.innerHTML = this.buildColorPickerHtml();
+    document.body.appendChild(el);
+    this.selectionColorPopoverEl = el;
+
+    el.addEventListener("mousedown", (evt) => {
+      evt.preventDefault();
+    });
+
+    el.addEventListener("click", (evt) => {
+      const t = evt.target;
+      if (!(t instanceof HTMLElement)) return;
+      const btn = t.closest(".nst-swatch");
+      if (!(btn instanceof HTMLElement)) return;
+      const color = btn.getAttribute("data-color");
+      const kind = this.selectionColorPopoverKind;
+      const editor = this.lastActiveEditor;
+      if (!color || !kind || !editor) return;
+      if (kind === "tc") {
+        this.selectionColorState.tc = color;
+        this.applySpanStyle(editor, { color });
+      }
+      if (kind === "bg") {
+        this.selectionColorState.bg = color;
+        this.applySpanStyle(editor, { background: color });
+      }
+      this.updateSelectionColorButtons();
+      this.hideSelectionColorPopover();
+    });
+
+    return el;
+  }
+
+  showSelectionColorPopover(kind) {
+    if (!this.selectionBarEl) return;
+    const el = this.ensureSelectionColorPopover();
+    this.selectionColorPopoverKind = kind;
+    el.setAttribute("data-kind", kind);
+    el.style.display = "block";
+    this.positionSelectionColorPopover();
+    this.updateSelectionColorButtons();
+  }
+
+  hideSelectionColorPopover() {
+    if (!this.selectionColorPopoverEl) return;
+    this.selectionColorPopoverEl.style.display = "none";
+    this.selectionColorPopoverKind = null;
+    this.updateSelectionColorButtons();
+  }
+
+  toggleSelectionColorPopover(kind) {
+    if (!this.selectionColorPopoverEl || this.selectionColorPopoverEl.style.display === "none") {
+      this.showSelectionColorPopover(kind);
+      return;
+    }
+    if (this.selectionColorPopoverKind === kind) {
+      this.hideSelectionColorPopover();
+      return;
+    }
+    this.showSelectionColorPopover(kind);
+  }
+
+  positionSelectionColorPopover() {
+    if (!this.selectionBarEl || !this.selectionColorPopoverEl || this.selectionColorPopoverEl.style.display === "none") return;
+    const kind = this.selectionColorPopoverKind;
+    if (!kind) return;
+
+    const trigger = this.selectionBarEl.querySelector(kind === "tc" ? '[data-act="tc-menu"]' : '[data-act="bg-menu"]');
+    if (!(trigger instanceof HTMLElement)) return;
+    const rect = trigger.getBoundingClientRect();
+
+    const pop = this.selectionColorPopoverEl;
+    const popRect = pop.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    let left = rect.left;
+    let top = rect.bottom + 8;
+
+    left = clamp(left, 8, Math.max(8, vw - popRect.width - 8));
+    if (top + popRect.height > vh - 8) {
+      top = clamp(rect.top - popRect.height - 8, 8, vh - popRect.height - 8);
+    }
+
+    pop.style.left = `${Math.round(left)}px`;
+    pop.style.top = `${Math.round(top)}px`;
+  }
+
+  updateSelectionColorButtons() {
+    if (!this.selectionBarEl) return;
+    const tc = this.selectionBarEl.querySelector('[data-act="tc-menu"]');
+    const bg = this.selectionBarEl.querySelector('[data-act="bg-menu"]');
+    const open = this.selectionColorPopoverEl && this.selectionColorPopoverEl.style.display !== "none";
+    const kind = open ? this.selectionColorPopoverKind : null;
+    if (tc instanceof HTMLElement) tc.classList.toggle("is-active", kind === "tc");
+    if (bg instanceof HTMLElement) bg.classList.toggle("is-active", kind === "bg");
   }
 
   async saveSettings() {
@@ -376,6 +514,18 @@ module.exports = class NotionLikeEditorPlugin extends Plugin {
         apply: (editor) => {
           this.deleteSlashTriggerText(editor);
           this.wrapOrInsertAndPlaceCursor(editor, "`", "`", { placeholder: "", cursorOffset: 1 });
+        }
+      },
+      {
+        id: "formula",
+        section: "基本区块",
+        label: "公式",
+        icon: "√x",
+        shortcut: "$$",
+        keywords: ["math", "formula", "latex", "katex", "公式"],
+        apply: (editor) => {
+          this.deleteSlashTriggerText(editor);
+          this.insertMathBlock(editor);
         }
       },
       {
@@ -889,6 +1039,12 @@ module.exports = class NotionLikeEditorPlugin extends Plugin {
     editor.setCursor({ line: at.line + 1, ch: 0 });
   }
 
+  insertMathBlock(editor) {
+    const at = editor.getCursor();
+    editor.replaceSelection("$$\n\n$$\n");
+    editor.setCursor({ line: at.line + 1, ch: 0 });
+  }
+
   showSelectionBar(editor) {
     if (!this.selectionBarEl) {
       const bar = document.createElement("div");
@@ -897,8 +1053,10 @@ module.exports = class NotionLikeEditorPlugin extends Plugin {
         <div class="nst-select-row">
           <button data-act="bold"><b>B</b></button>
           <button data-act="italic"><i>I</i></button>
+          <button data-act="underline"><u>U</u></button>
           <button data-act="strike"><s>S</s></button>
           <button data-act="code"><code>{ }</code></button>
+          <button data-act="formula">√x</button>
           <button data-act="link">🔗</button>
           <button data-act="page">[[ ]]</button>
           <span class="sep"></span>
@@ -914,15 +1072,8 @@ module.exports = class NotionLikeEditorPlugin extends Plugin {
         <div class="nst-select-row">
           <button data-act="highlight">高亮</button>
           <span class="sep"></span>
-          <button class="nst-color nst-tc" data-act="tc:#e03e3e" style="--c:#e03e3e"></button>
-          <button class="nst-color nst-tc" data-act="tc:#0f7b6c" style="--c:#0f7b6c"></button>
-          <button class="nst-color nst-tc" data-act="tc:#2b6cb0" style="--c:#2b6cb0"></button>
-          <button class="nst-color nst-tc" data-act="tc:#6b46c1" style="--c:#6b46c1"></button>
-          <span class="sep"></span>
-          <button class="nst-color nst-bg" data-act="bg:#fff3bf" style="--c:#fff3bf"></button>
-          <button class="nst-color nst-bg" data-act="bg:#ffd8d8" style="--c:#ffd8d8"></button>
-          <button class="nst-color nst-bg" data-act="bg:#d3f9d8" style="--c:#d3f9d8"></button>
-          <button class="nst-color nst-bg" data-act="bg:#d0ebff" style="--c:#d0ebff"></button>
+          <button data-act="tc-menu" title="字体颜色">字体颜色 ▾</button>
+          <button data-act="bg-menu" title="背景颜色">背景颜色 ▾</button>
           <span class="sep"></span>
           <button data-act="clr">清除</button>
         </div>
@@ -937,7 +1088,9 @@ module.exports = class NotionLikeEditorPlugin extends Plugin {
         btn.addEventListener("click", () => {
           const act = btn.getAttribute("data-act");
           if (!act) return;
-          this.formatSelection(act, editor);
+          const ed = this.lastActiveEditor ?? editor;
+          if (!ed) return;
+          this.formatSelection(act, ed);
         });
       });
     }
@@ -949,6 +1102,7 @@ module.exports = class NotionLikeEditorPlugin extends Plugin {
       this.selectionBarEl.remove();
       this.selectionBarEl = null;
     }
+    this.hideSelectionColorPopover();
   }
 
   positionSelectionBar() {
@@ -986,6 +1140,7 @@ module.exports = class NotionLikeEditorPlugin extends Plugin {
     const top = Math.max(8, anchor.top - barRect.height - 10);
     this.selectionBarEl.style.left = `${left}px`;
     this.selectionBarEl.style.top = `${top}px`;
+    this.positionSelectionColorPopover();
   }
 
   formatSelection(act, editor) {
@@ -1009,6 +1164,11 @@ module.exports = class NotionLikeEditorPlugin extends Plugin {
     }
     if (act === "italic") {
       toggleWrap("*");
+      this.hideSelectionBar();
+      return;
+    }
+    if (act === "underline") {
+      toggleWrap("<u>", "</u>");
       this.hideSelectionBar();
       return;
     }
@@ -1044,14 +1204,31 @@ module.exports = class NotionLikeEditorPlugin extends Plugin {
       this.hideSelectionBar();
       return;
     }
-    if (act.startsWith("tc:")) {
-      this.applySpanStyle(editor, { color: act.slice(3) });
+    if (act === "tc-menu") {
+      this.toggleSelectionColorPopover("tc");
+      return;
+    }
+    if (act === "bg-menu") {
+      this.toggleSelectionColorPopover("bg");
+      return;
+    }
+    if (act === "formula") {
+      const s = editor.getSelection();
+      if (s.startsWith("$$") && s.endsWith("$$") && s.length >= 4) {
+        let inner = s.slice(2, s.length - 2);
+        inner = inner.replace(/^\n/, "").replace(/\n$/, "");
+        editor.replaceSelection(inner);
+      } else if (s.startsWith("$") && s.endsWith("$") && s.length >= 2) {
+        editor.replaceSelection(s.slice(1, s.length - 1));
+      } else if (s.includes("\n")) {
+        editor.replaceSelection(`$$\n${s}\n$$`);
+      } else {
+        editor.replaceSelection(`$${s}$`);
+      }
       this.hideSelectionBar();
       return;
     }
-    if (act.startsWith("bg:")) {
-      this.applySpanStyle(editor, { background: act.slice(3) });
-      this.hideSelectionBar();
+    if (act === "more") {
       return;
     }
     if (act === "quote") {
@@ -1095,12 +1272,23 @@ module.exports = class NotionLikeEditorPlugin extends Plugin {
     const s = editor.getSelection();
     if (!s) return;
 
-    const unwrapped = this.stripOuterSpan(s);
+    const parsed = this.parseOuterSpan(s);
+    const inner = parsed ? parsed.inner : String(s);
+    const cur = parsed ? parsed.style : {};
+
+    const next = { ...cur };
+    if (style.color) next.color = style.color;
+    if (style.background) next["background-color"] = style.background;
+
     const parts = [];
-    if (style.color) parts.push(`color:${style.color}`);
-    if (style.background) parts.push(`background-color:${style.background}`);
-    const css = parts.join(";");
-    editor.replaceSelection(`<span style="${css}">${unwrapped}</span>`);
+    if (next.color) parts.push(`color:${next.color}`);
+    if (next["background-color"]) parts.push(`background-color:${next["background-color"]}`);
+
+    if (parts.length === 0) {
+      editor.replaceSelection(inner);
+      return;
+    }
+    editor.replaceSelection(`<span style="${parts.join(";")}">${inner}</span>`);
   }
 
   clearSpanStyle(editor) {
@@ -1166,9 +1354,31 @@ module.exports = class NotionLikeEditorPlugin extends Plugin {
   }
 
   stripOuterSpan(s) {
-    const m = String(s).match(/^<span\s+style=(["']).*?\1\s*>([\s\S]*)<\/span>$/i);
-    if (m) return m[2];
+    const parsed = this.parseOuterSpan(s);
+    if (parsed) return parsed.inner;
     return String(s);
+  }
+
+  parseOuterSpan(s) {
+    const m = String(s).match(/^<span\s+style=(['"])([\s\S]*?)\1\s*>([\s\S]*)<\/span>$/i);
+    if (!m) return null;
+    const styleText = m[2] ?? "";
+    const inner = m[3] ?? "";
+
+    const out = {};
+    for (const raw of styleText.split(";")) {
+      const seg = raw.trim();
+      if (!seg) continue;
+      const idx = seg.indexOf(":");
+      if (idx <= 0) continue;
+      const k = seg.slice(0, idx).trim().toLowerCase();
+      const v = seg.slice(idx + 1).trim();
+      if (!v) continue;
+      if (k === "color") out.color = v;
+      if (k === "background-color") out["background-color"] = v;
+    }
+
+    return { inner, style: out };
   }
 
   applyLinePrefix(editor, prefix) {

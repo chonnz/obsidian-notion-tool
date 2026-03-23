@@ -213,6 +213,78 @@
   border: 1px solid var(--background-modifier-border);
 }
 
+.nst-color-popover {
+  position: fixed;
+  z-index: 10001;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+  padding: 10px;
+  width: 300px;
+}
+
+.nst-color-title {
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 6px 2px;
+}
+
+.nst-color-grid {
+  display: grid;
+  grid-template-columns: repeat(9, 1fr);
+  gap: 6px;
+  padding: 2px 0 10px;
+}
+
+.nst-color-row {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 6px;
+  padding: 2px 0 10px;
+}
+
+.nst-swatch {
+  all: unset;
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+  border-radius: 2px;
+  background: var(--c);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  box-sizing: border-box;
+  cursor: pointer;
+}
+
+.theme-dark .nst-swatch {
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.nst-swatch:hover {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 1px;
+}
+
+.nst-color-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  padding-top: 6px;
+}
+
+.nst-color-action {
+  all: unset;
+  width: 42px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
 .nst-select-bar button:hover {
   background: var(--background-modifier-hover);
 }
