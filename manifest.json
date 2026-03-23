@@ -1,0 +1,11 @@
+{
+  "id": "notion-like-editor",
+  "name": "Notion Like Editor",
+  "version": "1.0.0",
+  "minAppVersion": "1.5.0",
+  "description": "Notion-like editor: drag-to-columns blocks, slash menu, and selection formatting toolbar.",
+  "author": "chonn",
+  "authorUrl": "",
+  "fundingUrl": "",
+  "isDesktopOnly": false
+}
