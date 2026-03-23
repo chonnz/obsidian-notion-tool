@@ -13,6 +13,19 @@
   flex-direction: column;
 }
 
+.nst-slash-hint {
+  position: fixed;
+  z-index: 9998;
+  pointer-events: none;
+  user-select: none;
+  color: var(--text-faint);
+  opacity: 0.85;
+  padding-left: 2px;
+  white-space: nowrap;
+  font-family: var(--font-text);
+  font-size: var(--font-text-size);
+}
+
 .nst-header {
   padding: 8px 0 2px;
 }
@@ -137,6 +150,12 @@
   border-bottom-left-radius: 12px;
   border-bottom-right-radius: 12px;
   border-top: 1px solid var(--background-modifier-border);
+  cursor: pointer;
+  user-select: none;
+}
+
+.nst-bottom:hover {
+  background: var(--background-modifier-hover);
 }
 
 .nst-empty {

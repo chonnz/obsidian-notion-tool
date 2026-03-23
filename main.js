@@ -158,8 +158,10 @@ module.exports = class NotionLikeEditorPlugin extends Plugin {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
 
     this.slashMenuEl = null;
+    this.slashHintEl = null;
     this.selectionBarEl = null;
     this.slashState = null;
+    this.slashDismiss = null;
     this.lastActiveEditor = null;
     this.columnSourceByEl = new WeakMap();
 
@@ -187,23 +189,25 @@ module.exports = class NotionLikeEditorPlugin extends Plugin {
 
     this.registerDomEvent(window, "resize", () => {
       this.positionSlashMenu();
+      this.positionSlashHint();
       this.positionSelectionBar();
     });
     this.registerDomEvent(window, "scroll", () => {
       this.positionSlashMenu();
+      this.positionSlashHint();
       this.positionSelectionBar();
     }, true);
 
     this.registerDomEvent(window, "keydown", (evt) => {
       if (evt.key === "Escape" || evt.key === "Esc") {
-        this.hideSlashMenu();
+        this.dismissSlashMenu();
         this.hideSelectionBar();
       }
     }, true);
 
     this.registerDomEvent(document, "keydown", (evt) => {
       if (evt.key === "Escape" || evt.key === "Esc") {
-        this.hideSlashMenu();
+        this.dismissSlashMenu();
         this.hideSelectionBar();
       }
     });
@@ -212,7 +216,7 @@ module.exports = class NotionLikeEditorPlugin extends Plugin {
       const t = evt.target;
       if (this.slashMenuEl && t instanceof Node && this.slashMenuEl.contains(t)) return;
       if (this.selectionBarEl && t instanceof Node && this.selectionBarEl.contains(t)) return;
-      this.hideSlashMenu();
+      this.dismissSlashMenu();
       this.hideSelectionBar();
     });
 
@@ -547,6 +551,7 @@ module.exports = class NotionLikeEditorPlugin extends Plugin {
         this.renderSlashMenu(editor);
       }
       this.positionSlashMenu();
+      this.updateSlashHint(editor);
       return;
     }
 
@@ -554,6 +559,17 @@ module.exports = class NotionLikeEditorPlugin extends Plugin {
     if (cursor.ch <= 0) return;
     const left = lineText[cursor.ch - 1];
     if (left !== "/") return;
+
+    if (this.slashDismiss) {
+      const d = this.slashDismiss;
+      const dismissedSamePos = cursor.line === d.line && cursor.ch === d.chAfter;
+      const stillInWindow = Date.now() - d.at < 5000;
+      if (dismissedSamePos && stillInWindow) return;
+      if (!dismissedSamePos || !stillInWindow) {
+        this.slashDismiss = null;
+      }
+    }
+
     const beforeSlash = cursor.ch - 2 >= 0 ? lineText[cursor.ch - 2] : "";
     if (beforeSlash && !isWhitespace(beforeSlash)) return;
     this.showSlashMenu(editor, { line: cursor.line, ch: cursor.ch - 1 });
@@ -575,6 +591,7 @@ module.exports = class NotionLikeEditorPlugin extends Plugin {
 
     this.renderSlashMenu(editor);
     this.positionSlashMenu();
+    this.updateSlashHint(editor);
     this.attachSlashKeyHandler(editor);
   }
 
@@ -583,19 +600,89 @@ module.exports = class NotionLikeEditorPlugin extends Plugin {
       this.slashMenuEl.remove();
       this.slashMenuEl = null;
     }
+    this.hideSlashHint();
     if (this.slashState?.detachKeys) {
       this.slashState.detachKeys();
     }
     this.slashState = null;
   }
 
+  dismissSlashMenu() {
+    if (this.slashState) {
+      this.slashDismiss = {
+        line: this.slashState.triggerPos.line,
+        chAfter: this.slashState.triggerPos.ch + 1,
+        at: Date.now()
+      };
+    }
+    this.hideSlashMenu();
+  }
+
+  ensureSlashHintEl() {
+    if (this.slashHintEl) return this.slashHintEl;
+    const el = document.createElement("div");
+    el.className = "nst-slash-hint";
+    el.textContent = "输入以搜索";
+    el.style.display = "none";
+    document.body.appendChild(el);
+    this.slashHintEl = el;
+    return el;
+  }
+
+  hideSlashHint() {
+    if (!this.slashHintEl) return;
+    this.slashHintEl.style.display = "none";
+  }
+
+  updateSlashHint(editor) {
+    if (!this.slashState) {
+      this.hideSlashHint();
+      return;
+    }
+    const cur = editor.getCursor?.();
+    if (!cur || cur.line !== this.slashState.triggerPos.line || cur.ch !== this.slashState.triggerPos.ch + 1) {
+      this.hideSlashHint();
+      return;
+    }
+    if (this.slashState.query) {
+      this.hideSlashHint();
+      return;
+    }
+    const el = this.ensureSlashHintEl();
+    const ok = this.positionSlashHint(editor);
+    el.style.display = ok ? "block" : "none";
+  }
+
+  positionSlashHint(editorArg) {
+    const editor = editorArg ?? this.lastActiveEditor;
+    if (!this.slashState || !editor) return false;
+    const el = this.slashHintEl;
+    if (!el) return false;
+
+    const cm = tryGetEditorView(editor);
+    if (!cm) return false;
+
+    const pos = cmPosFromEditorCursor(cm, {
+      line: this.slashState.triggerPos.line,
+      ch: this.slashState.triggerPos.ch + 1
+    });
+    const r = rectFromCmPos(cm, pos);
+    if (!r) return false;
+
+    el.style.left = `${Math.round(r.left)}px`;
+    el.style.top = `${Math.round(r.top)}px`;
+    el.style.height = `${Math.max(0, Math.round(r.bottom - r.top))}px`;
+    el.style.lineHeight = el.style.height;
+    return true;
+  }
+
   attachSlashKeyHandler(editor) {
     const onKeyDown = (evt) => {
       if (!this.slashState || !this.slashMenuEl) return;
-      if (evt.key === "Escape") {
+      if (evt.key === "Escape" || evt.key === "Esc" || evt.keyCode === 27) {
         evt.preventDefault();
         evt.stopPropagation();
-        this.hideSlashMenu();
+        this.dismissSlashMenu();
         return;
       }
       if (evt.key === "ArrowDown" || evt.key === "ArrowUp" || evt.key === "Enter") {
@@ -658,7 +745,7 @@ module.exports = class NotionLikeEditorPlugin extends Plugin {
     this.slashState.visibleItemIds = visible.map((x) => x.id);
     this.slashState.selectedIndex = clamp(this.slashState.selectedIndex, 0, Math.max(0, visible.length - 1));
 
-    const chipText = q ? `${escapeHtml(q)}` : "输入以搜索";
+    const chipText = q ? `${escapeHtml(q)}` : "";
 
     const bySection = new Map();
     for (const it of visible) {
@@ -668,7 +755,9 @@ module.exports = class NotionLikeEditorPlugin extends Plugin {
     }
 
     const content = [];
-    content.push(`<div class="nst-header"><div class="nst-chip">${chipText}</div></div>`);
+    if (chipText) {
+      content.push(`<div class="nst-header"><div class="nst-chip">${chipText}</div></div>`);
+    }
     content.push(`<div class="nst-scroll">`);
 
     const pushSection = (title) => {
@@ -703,6 +792,16 @@ module.exports = class NotionLikeEditorPlugin extends Plugin {
     content.push(`<div class="nst-bottom"><span>关闭菜单</span><span class="nst-kbd">esc</span></div>`);
 
     this.slashMenuEl.innerHTML = content.join("");
+
+    const bottom = this.slashMenuEl.querySelector(".nst-bottom");
+    if (bottom) {
+      bottom.addEventListener("mousedown", (evt) => {
+        evt.preventDefault();
+      });
+      bottom.addEventListener("click", () => {
+        this.dismissSlashMenu();
+      });
+    }
 
     this.slashMenuEl.querySelectorAll(".nst-item").forEach((row) => {
       row.addEventListener("mouseenter", () => {
